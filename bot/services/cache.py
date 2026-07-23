@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -24,6 +25,9 @@ CARGO_TYPE_KEYWORDS = ("вантаж",)  # «Вантажне відділенн
 
 # Статусы отделений, которые считаем рабочими.
 WORKING_STATUS = "Working"
+
+# Пауза между постраничными запросами — чтобы не упираться в rate limit НП.
+PAGE_DELAY = 0.35
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settlements (
@@ -257,6 +261,7 @@ class Cache:
             if len(data) < limit:
                 break
             page += 1
+            await asyncio.sleep(PAGE_DELAY)
         return saved
 
     @staticmethod
@@ -330,6 +335,7 @@ class Cache:
             if len(data) < limit:
                 break
             page += 1
+            await asyncio.sleep(PAGE_DELAY)
         return saved
 
     @staticmethod

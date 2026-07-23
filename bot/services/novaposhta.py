@@ -28,9 +28,18 @@ API_URL = "https://api.novaposhta.ua/v2.0/json/"
 
 # Таймаут на один запрос и параметры ретраев.
 REQUEST_TIMEOUT = 15.0
-MAX_RETRIES = 2  # плюс первая попытка => максимум 3 обращения
-RETRY_BASE_DELAY = 1.0  # экспоненциальная задержка: 1с, 2с, ...
+MAX_RETRIES = 4  # плюс первая попытка => максимум 5 обращений
+RETRY_BASE_DELAY = 1.0  # сетевые/5xx: 1с, 2с, ...
+RATE_LIMIT_BASE_DELAY = 2.0  # «too many requests»: 2с, 4с, 8с, ...
 MAX_CONCURRENCY = 5  # не долбим API больше 5 запросов одновременно
+
+# Подстроки, по которым опознаём rate-limit НП (приходит как success=false).
+RATE_LIMIT_MARKERS = ("many request", "too many", "перевищено", "часто")
+
+
+def _is_rate_limited(messages: list[Any]) -> bool:
+    text = " ".join(str(m) for m in messages).lower()
+    return any(marker in text for marker in RATE_LIMIT_MARKERS)
 
 
 class NovaPoshtaError(Exception):
@@ -143,6 +152,19 @@ class NovaPoshtaClient:
                 text = "; ".join(str(e) for e in (errors or warnings)) or (
                     "Новая Почта вернула ошибку без описания"
                 )
+                # «Too many requests» НП отдаёт как success=false — это не
+                # фатальная ошибка, а лимит частоты. Ретраим с бэкоффом.
+                if _is_rate_limited(errors + warnings) and attempt < MAX_RETRIES:
+                    delay = RATE_LIMIT_BASE_DELAY * (2**attempt)
+                    logger.warning(
+                        "NP %s/%s rate limit, повтор через %.1fс (попытка %d)",
+                        model,
+                        method,
+                        delay,
+                        attempt + 1,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 logger.warning("NP %s/%s success=false: %s", model, method, text)
                 raise NovaPoshtaError(text, errors=[str(e) for e in errors])
 
