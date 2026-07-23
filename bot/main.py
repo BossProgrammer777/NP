@@ -13,11 +13,13 @@ from aiogram import Bot, Dispatcher
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot.config import settings
-from bot.handlers import common, find_warehouse
+from bot.handlers import common, delivery_date, find_warehouse, price
 from bot.services.cache import Cache
 from bot.services.geocoder import Geocoder, build_geocoder
 from bot.services.novaposhta import NovaPoshtaClient
 from bot.utils import SyncState
+
+__all__ = ["main"]
 
 logger = logging.getLogger(__name__)
 
@@ -82,17 +84,21 @@ async def main() -> None:
 
     cache = Cache(settings.db_path)
     geocoder = build_geocoder(cache, settings)
+    np = NovaPoshtaClient(settings.np_api_key)
     sync_state = SyncState()
     scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
 
     # Зависимости прокидываем в хендлеры через workflow_data.
     dp["cache"] = cache
     dp["geocoder"] = geocoder
+    dp["np"] = np
     dp["sync_state"] = sync_state
 
     # Порядок регистрации важен: команды первыми, фолбэк последним.
     dp.include_router(common.router)
     dp.include_router(find_warehouse.router)
+    dp.include_router(delivery_date.router)
+    dp.include_router(price.router)
     dp.include_router(common.fallback_router)
 
     await on_startup(cache, sync_state, scheduler)
@@ -100,6 +106,7 @@ async def main() -> None:
         await dp.start_polling(bot)
     finally:
         await on_shutdown(cache, geocoder, scheduler)
+        await np.aclose()
         await bot.session.close()
 
 
