@@ -27,7 +27,11 @@ async def main() -> None:
 
         print(f"\nНаселённых пунктов сохранено: {settlements}")
         print(f"Отделений (грузовых и прочих) сохранено: {warehouses}")
-        print(f"Грузовой тип: {await cache.cargo_type_ref()}")
+        print(f"Грузовые типы: {await cache.cargo_type_refs()}")
+
+        async with cache.db.execute("SELECT COUNT(*) AS c FROM cities") as cur:
+            row = await cur.fetchone()
+        print(f"Городов в каталоге: {row['c']}")
 
         # Контроль координат.
         async with cache.db.execute(
@@ -37,19 +41,13 @@ async def main() -> None:
             row = await cur.fetchone()
         print(f"Отделений с пустыми координатами (должно быть 0): {row['c']}")
 
-        # Пример грузовых отделений.
-        type_ref = await cache.cargo_type_ref()
-        async with cache.db.execute(
-            "SELECT number, description, latitude, longitude FROM warehouses "
-            "WHERE type_ref = ? LIMIT 5",
-            (type_ref,),
-        ) as cur:
-            print("\nПримеры грузовых отделений:")
-            for r in await cur.fetchall():
-                print(
-                    f"  №{r['number']} {r['description']} "
-                    f"({r['latitude']}, {r['longitude']})"
-                )
+        # Проверка на живом примере: Киев ищем и по-русски.
+        found = await cache.find_cities("Киев")
+        print(f"\nПоиск 'Киев' -> {len(found)} совпадений:")
+        for c in found[:3]:
+            print(f"  {c['description']} (area={c['area']}) ref={c['ref']}")
+            wh = await cache.get_cargo_warehouses(c["ref"])
+            print(f"    грузовых отделений: {len(wh)}")
     finally:
         await cache.close()
 

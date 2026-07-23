@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from aiogram import F, Router
@@ -16,6 +17,7 @@ from bot import widgets
 from bot.services.cache import Cache
 from bot.services.geo import format_distance, haversine_km, maps_link
 from bot.services.geocoder import Geocoder
+from bot.services.novaposhta import NovaPoshtaClient, NovaPoshtaError
 from bot.states import FindWarehouse
 from bot.utils import SyncState
 
@@ -108,6 +110,7 @@ async def _city_selected(
         city_ref=settlement["ref"],
         city_name=settlement.get("description"),
         city_area=settlement.get("area"),
+        city_settlement_ref=settlement.get("settlement_ref"),
         city_lat=settlement.get("latitude"),
         city_lon=settlement.get("longitude"),
     )
@@ -136,17 +139,55 @@ async def city_choice(
 # --- Улица и выдача результата -------------------------------------------
 
 
+def _street_name_only(street: str) -> str:
+    """Отрезаем номер дома — поиску улиц НП нужно только название."""
+    # Убираем хвостовые числа/диапазоны домов (напр. «Промислова 42», «42а»).
+    cleaned = re.sub(r"[\d/].*$", "", street).strip(" ,.-")
+    return cleaned or street
+
+
+async def _geocode_address(
+    np: NovaPoshtaClient,
+    geocoder: Geocoder,
+    settlement_ref: str | None,
+    city_area: str,
+    city_name: str,
+    street: str,
+) -> tuple[float, float] | None:
+    """Координаты адреса: сперва поиск улиц НП, затем Nominatim как резерв."""
+    # 1) Родной поиск улиц НП (возвращает Location с координатами).
+    if settlement_ref:
+        try:
+            addresses = await np.search_settlement_streets(
+                _street_name_only(street), settlement_ref
+            )
+            for addr in addresses:
+                loc = addr.get("Location") or {}
+                lat = loc.get("lat")
+                lon = loc.get("lon")
+                if lat is not None and lon is not None:
+                    return float(lat), float(lon)
+        except (NovaPoshtaError, ValueError, TypeError) as exc:
+            logger.warning("Поиск улиц НП не удался: %s", exc)
+
+    # 2) Резерв — Nominatim.
+    query = f"Україна, {city_area}, {city_name}, {street}"
+    return await geocoder.geocode(query)
+
+
 @router.message(FindWarehouse.waiting_street)
 async def street_text(
     message: Message,
     state: FSMContext,
     cache: Cache,
     geocoder: Geocoder,
+    np: NovaPoshtaClient,
 ) -> None:
     data = await state.get_data()
     city_ref = data["city_ref"]
     city_name = data.get("city_name") or ""
     city_area = data.get("city_area") or ""
+    settlement_ref = data.get("city_settlement_ref")
     street = (message.text or "").strip()
 
     warehouses = await cache.get_cargo_warehouses(city_ref)
@@ -157,8 +198,9 @@ async def street_text(
         return
 
     # Геокодим адрес. Если не вышло — показываем все отделения города списком.
-    query = f"Україна, {city_area}, {city_name}, {street}"
-    coords = await geocoder.geocode(query)
+    coords = await _geocode_address(
+        np, geocoder, settlement_ref, city_area, city_name, street
+    )
 
     if coords is None:
         await message.answer(
@@ -205,7 +247,7 @@ async def _handle_no_cargo(
         await state.clear()
         return
 
-    nearby = await cache.settlements_with_cargo_nearby(
+    nearby = await cache.cities_with_cargo_nearby(
         city_lat, city_lon, radius_km=50.0
     )
     if not nearby:
@@ -217,7 +259,7 @@ async def _handle_no_cargo(
         return
 
     nearest = nearby[0]
-    nearest_name = nearest["settlement"].get("description") or ""
+    nearest_name = nearest["city"].get("description") or ""
     await message.answer(
         texts.NO_CARGO_IN_CITY.format(
             city=city_name,
@@ -227,7 +269,7 @@ async def _handle_no_cargo(
         reply_markup=kb.main_menu(),
     )
     # Показываем грузовые отделения ближайшего города.
-    warehouses = await cache.get_cargo_warehouses(nearest["settlement"]["ref"])
+    warehouses = await cache.get_cargo_warehouses(nearest["city"]["ref"])
     for w in warehouses[:NEAREST_COUNT]:
         await message.answer(format_warehouse(w))
     await state.clear()
