@@ -64,6 +64,33 @@ def today_ddmmyyyy() -> str:
     return date.today().strftime("%d.%m.%Y")
 
 
+def tomorrow_ddmmyyyy() -> str:
+    """Завтрашняя дата в формате dd.mm.yyyy."""
+    from datetime import timedelta
+
+    return (date.today() + timedelta(days=1)).strftime("%d.%m.%Y")
+
+
+def parse_ship_date(text: str) -> str | None:
+    """Парсит дату отправки, отданную пользователем, в dd.mm.yyyy.
+
+    Принимает дд.мм.гггг, дд.мм.гг и дд.мм (текущий год). Прошедшие даты
+    отбрасываем — отправить в прошлое нельзя.
+    """
+    raw = (text or "").strip()
+    for fmt in ("%d.%m.%Y", "%d.%m.%y", "%d.%m"):
+        try:
+            d = datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+        if fmt == "%d.%m":
+            d = d.replace(year=date.today().year)
+        if d < date.today():
+            return None
+        return d.strftime("%d.%m.%Y")
+    return None
+
+
 def extract_delivery_date(data: list[dict[str, Any]]) -> date | None:
     """Достаёт дату доставки из ответа НП.
 

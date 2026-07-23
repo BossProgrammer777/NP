@@ -114,24 +114,54 @@ async def recipient_choice(
 @router.callback_query(
     DeliveryDate.waiting_service_type, F.data.startswith(f"{kb.CB_SERVICE}:")
 )
-async def service_selected(
-    callback: CallbackQuery,
-    state: FSMContext,
-    np: NovaPoshtaClient,
-) -> None:
+async def service_selected(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     service_type = (callback.data or "").split(":", 1)[-1]
-    data = await state.get_data()
+    await state.update_data(service_type=service_type)
+    await state.set_state(DeliveryDate.waiting_date)
+    await callback.message.answer(
+        texts.ASK_SHIP_DATE, reply_markup=kb.ship_date()
+    )
 
+
+@router.callback_query(
+    DeliveryDate.waiting_date, F.data.startswith(f"{kb.CB_DATE}:")
+)
+async def date_chosen(
+    callback: CallbackQuery, state: FSMContext, np: NovaPoshtaClient
+) -> None:
+    await callback.answer()
+    kind = (callback.data or "").split(":", 1)[-1]
+    date_time = (
+        utils.tomorrow_ddmmyyyy() if kind == "tomorrow" else utils.today_ddmmyyyy()
+    )
+    await _compute(callback.message, state, np, date_time)
+
+
+@router.message(DeliveryDate.waiting_date)
+async def date_text(
+    message: Message, state: FSMContext, np: NovaPoshtaClient
+) -> None:
+    date_time = utils.parse_ship_date(message.text or "")
+    if date_time is None:
+        await message.answer(texts.BAD_DATE, reply_markup=kb.ship_date())
+        return
+    await _compute(message, state, np, date_time)
+
+
+async def _compute(
+    message: Message, state: FSMContext, np: NovaPoshtaClient, date_time: str
+) -> None:
+    data = await state.get_data()
     try:
         result = await np.get_document_delivery_date(
             city_sender=data["sender_ref"],
             city_recipient=data["recipient_ref"],
-            service_type=service_type,
-            date_time=utils.today_ddmmyyyy(),
+            service_type=data["service_type"],
+            date_time=date_time,
         )
     except NovaPoshtaError as exc:
-        await callback.message.answer(
+        await message.answer(
             texts.API_ERROR.format(error=exc), reply_markup=kb.main_menu()
         )
         await state.clear()
@@ -139,18 +169,15 @@ async def service_selected(
 
     target = utils.extract_delivery_date(result)
     if target is None:
-        await callback.message.answer(
-            texts.GENERIC_ERROR, reply_markup=kb.main_menu()
-        )
+        await message.answer(texts.GENERIC_ERROR, reply_markup=kb.main_menu())
         await state.clear()
         return
 
     lines = [
         f"⏱ {data.get('sender_name')} → {data.get('recipient_name')}",
+        f"🚚 Отправка: {date_time}",
         f"📅 Ориентировочная доставка: {utils.format_delivery_line(target)}",
         texts.DELIVERY_DATE_DISCLAIMER,
     ]
-    await callback.message.answer(
-        "\n".join(lines), reply_markup=kb.main_menu()
-    )
+    await message.answer("\n".join(lines), reply_markup=kb.main_menu())
     await state.clear()

@@ -19,6 +19,7 @@ class DeliveryDate(StatesGroup):
     waiting_recipient_city = State()
     choosing_recipient_city = State()
     waiting_service_type = State()
+    waiting_date = State()
 
 
 class Price(StatesGroup):
@@ -29,6 +30,7 @@ class Price(StatesGroup):
     waiting_recipient_city = State()
     choosing_recipient_city = State()
     waiting_service_type = State()
+    waiting_date = State()
     waiting_weight = State()
     waiting_dimensions = State()
     waiting_declared_cost = State()

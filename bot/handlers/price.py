@@ -113,8 +113,37 @@ async def service_selected(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     service_type = (callback.data or "").split(":", 1)[-1]
     await state.update_data(service_type=service_type)
+    await state.set_state(Price.waiting_date)
+    await callback.message.answer(
+        texts.ASK_SHIP_DATE, reply_markup=kb.ship_date()
+    )
+
+
+async def _date_set(message: Message, state: FSMContext, date_time: str) -> None:
+    await state.update_data(date_time=date_time)
     await state.set_state(Price.waiting_weight)
-    await callback.message.answer(texts.ASK_WEIGHT, reply_markup=kb.cancel_menu())
+    await message.answer(texts.ASK_WEIGHT, reply_markup=kb.cancel_menu())
+
+
+@router.callback_query(
+    Price.waiting_date, F.data.startswith(f"{kb.CB_DATE}:")
+)
+async def date_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    kind = (callback.data or "").split(":", 1)[-1]
+    date_time = (
+        utils.tomorrow_ddmmyyyy() if kind == "tomorrow" else utils.today_ddmmyyyy()
+    )
+    await _date_set(callback.message, state, date_time)
+
+
+@router.message(Price.waiting_date)
+async def date_text(message: Message, state: FSMContext) -> None:
+    date_time = utils.parse_ship_date(message.text or "")
+    if date_time is None:
+        await message.answer(texts.BAD_DATE, reply_markup=kb.ship_date())
+        return
+    await _date_set(message, state, date_time)
 
 
 @router.message(Price.waiting_weight)
@@ -220,7 +249,7 @@ async def _calculate_and_reply(
             city_sender=data["sender_ref"],
             city_recipient=data["recipient_ref"],
             service_type=service_type,
-            date_time=utils.today_ddmmyyyy(),
+            date_time=data.get("date_time") or utils.today_ddmmyyyy(),
         )
         target = utils.extract_delivery_date(date_data)
         if target is not None:

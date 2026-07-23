@@ -146,15 +146,39 @@ def _street_name_only(street: str) -> str:
     return cleaned or street
 
 
+async def _resolve_settlement_ref(
+    np: NovaPoshtaClient, city_name: str, city_ref: str
+) -> str | None:
+    """Достаёт SettlementRef города онлайн через searchSettlements.
+
+    Нужен для поиска улиц. В ответе каждого адреса есть Ref (нас.пункт) и
+    DeliveryCity (город). Берём тот, чей DeliveryCity совпал с нашим city_ref.
+    """
+    try:
+        addresses = await np.search_settlements(city_name, limit=20)
+    except NovaPoshtaError as exc:
+        logger.warning("searchSettlements для %r не удался: %s", city_name, exc)
+        return None
+    for a in addresses:
+        if a.get("DeliveryCity") == city_ref:
+            return a.get("Ref")
+    return addresses[0].get("Ref") if addresses else None
+
+
 async def _geocode_address(
     np: NovaPoshtaClient,
     geocoder: Geocoder,
     settlement_ref: str | None,
+    city_ref: str,
     city_area: str,
     city_name: str,
     street: str,
 ) -> tuple[float, float] | None:
     """Координаты адреса: сперва поиск улиц НП, затем Nominatim как резерв."""
+    # Если ref населённого пункта не сохранён в кэше — добираем онлайн.
+    if not settlement_ref:
+        settlement_ref = await _resolve_settlement_ref(np, city_name, city_ref)
+
     # 1) Родной поиск улиц НП (возвращает Location с координатами).
     if settlement_ref:
         try:
@@ -165,7 +189,7 @@ async def _geocode_address(
                 loc = addr.get("Location") or {}
                 lat = loc.get("lat")
                 lon = loc.get("lon")
-                if lat is not None and lon is not None:
+                if lat not in (None, "") and lon not in (None, ""):
                     return float(lat), float(lon)
         except (NovaPoshtaError, ValueError, TypeError) as exc:
             logger.warning("Поиск улиц НП не удался: %s", exc)
@@ -197,9 +221,9 @@ async def street_text(
         await _handle_no_cargo(message, state, cache, data)
         return
 
-    # Геокодим адрес. Если не вышло — показываем все отделения города списком.
+    # Геокодим адрес. Если не вышло — показываем несколько отделений города.
     coords = await _geocode_address(
-        np, geocoder, settlement_ref, city_area, city_name, street
+        np, geocoder, settlement_ref, city_ref, city_area, city_name, street
     )
 
     if coords is None:
@@ -207,7 +231,7 @@ async def street_text(
             texts.STREET_NOT_FOUND.format(city=city_name),
             reply_markup=kb.main_menu(),
         )
-        for w in warehouses:
+        for w in warehouses[:NEAREST_COUNT]:
             await message.answer(format_warehouse(w))
         await state.clear()
         return

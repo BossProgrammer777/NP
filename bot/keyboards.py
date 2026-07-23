@@ -17,6 +17,7 @@ from bot import texts
 CB_CITY = "city"  # выбор города из списка уточнения
 CB_SERVICE = "svc"  # выбор ServiceType
 CB_SKIP = "skip"  # пропустить шаг (габариты)
+CB_DATE = "date"  # выбор даты отправки
 CB_CANCEL = "cancel"
 
 
@@ -80,6 +81,22 @@ def service_types() -> InlineKeyboardMarkup:
         for code, label in texts.SERVICE_TYPES.items()
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ship_date() -> InlineKeyboardMarkup:
+    """Кнопки выбора даты отправки: сегодня / завтра."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=texts.BTN_TODAY, callback_data=f"{CB_DATE}:today"
+                ),
+                InlineKeyboardButton(
+                    text=texts.BTN_TOMORROW, callback_data=f"{CB_DATE}:tomorrow"
+                ),
+            ]
+        ]
+    )
 
 
 def skip_dimensions() -> InlineKeyboardMarkup:
