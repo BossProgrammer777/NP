@@ -189,12 +189,20 @@ class NovaPoshtaClient:
     async def search_settlements(
         self, city_name: str, limit: int = 5
     ) -> list[dict[str, Any]]:
-        """Быстрый онлайн-поиск города (без кэша)."""
-        return await self.call(
+        """Быстрый онлайн-поиск города (без кэша).
+
+        Ответ приходит обёрнутым: ``data[0].Addresses`` — список найденных
+        населённых пунктов. Каждый несёт ``Ref`` (населённый пункт, для поиска
+        улиц) и ``DeliveryCity`` (город, тот же ref, что у отделений).
+        """
+        data = await self.call(
             "Address",
             "searchSettlements",
-            {"CityName": city_name, "Limit": str(limit)},
+            {"CityName": city_name, "Limit": str(limit), "Page": "1"},
         )
+        if data and isinstance(data[0], dict) and "Addresses" in data[0]:
+            return data[0].get("Addresses") or []
+        return data
 
     async def get_warehouse_types(self) -> list[dict[str, Any]]:
         """Типы отделений (в т.ч. грузовое)."""
