@@ -33,7 +33,7 @@ async def lookup_city(cache: Cache, query: str) -> tuple[str, Any]:
     query = (query or "").strip()
     if not query:
         return LOOKUP_NONE, None
-    results = await cache.find_settlements(query)
+    results = await cache.find_cities(query)
     if not results:
         return LOOKUP_NONE, None
     if len(results) == 1:
@@ -91,7 +91,7 @@ async def process_city_choice(
     """Обрабатывает нажатие на инлайн-кнопку конкретного города."""
     await callback.answer()
     ref = (callback.data or "").split(":", 1)[-1]
-    settlement = await cache.get_settlement(ref)
+    settlement = await cache.get_city(ref)
     if settlement is None:
         await callback.message.answer(
             texts.CITY_NOT_FOUND, reply_markup=kb.cancel_menu()

@@ -215,6 +215,28 @@ class NovaPoshtaClient:
             props["TypeOfWarehouseRef"] = type_ref
         return await self.call("Address", "getWarehouses", props)
 
+    async def search_settlement_streets(
+        self, street_name: str, settlement_ref: str, limit: int = 5
+    ) -> list[dict[str, Any]]:
+        """Поиск улицы в населённом пункте — с координатами.
+
+        Модель ``AddressGeneral``. Возвращает список адресов, у каждого есть
+        ``Location`` (lat/lon) и ``SettlementStreetDescriptionRu`` — берём
+        координаты прямо отсюда, без внешнего геокодера.
+        """
+        data = await self.call(
+            "AddressGeneral",
+            "searchSettlementStreets",
+            {
+                "StreetName": street_name,
+                "SettlementRef": settlement_ref,
+                "Limit": str(limit),
+            },
+        )
+        if not data:
+            return []
+        return data[0].get("Addresses") or []
+
     async def get_document_price(
         self,
         city_sender: str,
