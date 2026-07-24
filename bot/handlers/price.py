@@ -215,13 +215,23 @@ async def _calculate_and_reply(
     declared_cost = float(data["declared_cost"])
     service_type = data["service_type"]
 
+    # Расчётный вес считаем сами: НП тарифицирует по полю Weight, а объёмный
+    # вес из OptionsSeat в цену не подставляет. Для груза платят по большему из
+    # фактического и объёмного — его и передаём как Weight.
+    if dims is not None:
+        vol = utils.volumetric_weight_kg(dims[0], dims[1], dims[2], seats)
+        chargeable = max(weight, vol)
+    else:
+        vol = None
+        chargeable = weight
+
     options_seat = utils.build_options_seat(dims, weight, seats)
 
     try:
         price_data = await np.get_document_price(
             city_sender=data["sender_ref"],
             city_recipient=data["recipient_ref"],
-            weight=weight,
+            weight=round(chargeable, 2),
             cost=declared_cost,
             service_type=service_type,
             cargo_type=CARGO_TYPE,
@@ -262,11 +272,13 @@ async def _calculate_and_reply(
     if delivery_line:
         lines.append(f"📅 Ориентировочная доставка: {delivery_line}")
 
-    if dims is not None:
-        vol = utils.volumetric_weight_kg(dims[0], dims[1], dims[2], seats)
-        chargeable = max(weight, vol)
+    if vol is not None:
         label = "объёмный" if vol > weight else "фактический"
         lines.append(f"📦 Расчётный вес: {round(chargeable, 1)} кг ({label})")
+        if vol > weight:
+            lines.append(
+                f"   (факт {round(weight, 1)} кг, объёмный {round(vol, 1)} кг)"
+            )
     else:
         lines.append(f"📦 Вес: {round(weight, 1)} кг")
         lines.append(texts.VOLUME_WEIGHT_SKIPPED)
